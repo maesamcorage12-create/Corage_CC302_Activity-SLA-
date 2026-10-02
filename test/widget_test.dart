@@ -1,91 +1,122 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
 
 import 'package:sla_api_activity/main.dart';
-import 'package:sla_api_activity/services/api_service.dart';
 
-ApiService serviceReturning(String body, {int status = 200}) {
-  return ApiService(
-    client: MockClient((_) async => http.Response(body, status)),
-  );
+Map<String, dynamic> fruitJson(String name, {String family = 'Rosaceae'}) {
+  return {
+    'id': 1,
+    'name': name,
+    'family': family,
+    'genus': 'Malus',
+    'nutritions': {
+      'calories': 52,
+      'protein': 0.3,
+      'carbohydrates': 13.8,
+      'fat': 0.2,
+    },
+  };
 }
 
-const twoPosts = '[{"userId":1,"id":1,"title":"first title","body":"first body"},'
-    '{"userId":2,"id":2,"title":"second title","body":"second body"}]';
-
 void main() {
-  testWidgets('shows a loader while the request is in flight', (tester) async {
-    final pending = Completer<http.Response>();
-    final service = ApiService(
-      client: MockClient((_) => pending.future),
-    );
+  group('Fruit model', () {
+    test('fromJson maps every field', () {
+      final fruit = Fruit.fromJson(fruitJson('Apple'));
 
-    await tester.pumpWidget(MyApp(apiService: service));
-    await tester.pump();
+      expect(fruit.id, 1);
+      expect(fruit.name, 'Apple');
+      expect(fruit.family, 'Rosaceae');
+      expect(fruit.genus, 'Malus');
+      expect(fruit.calories, 52);
+      expect(fruit.protein, 0.3);
+      expect(fruit.carbohydrates, 13.8);
+      expect(fruit.fat, 0.2);
+    });
 
-    expect(find.text('API Posts'), findsOneWidget);
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    test('fromJson defaults a missing nutrition value to 0', () {
+      final json = fruitJson('Banana');
+      (json['nutritions'] as Map<String, dynamic>).remove('fat');
 
-    pending.complete(http.Response(twoPosts, 200));
-    await tester.pumpAndSettle();
-    expect(find.byType(CircularProgressIndicator), findsNothing);
+      final fruit = Fruit.fromJson(json);
+
+      expect(fruit.fat, 0);
+      expect(fruit.calories, 52);
+    });
   });
 
-  testWidgets('renders posts through ListView.builder on success', (
-    tester,
-  ) async {
-    await tester.pumpWidget(MyApp(apiService: serviceReturning(twoPosts)));
-    await tester.pumpAndSettle();
+  group('Widgets', () {
+    testWidgets('FruitCard renders name, family, genus and nutrition', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: FruitCard(fruit: Fruit.fromJson(fruitJson('Apple'))),
+          ),
+        ),
+      );
 
-    expect(find.byType(CircularProgressIndicator), findsNothing);
-    expect(find.text('first title'), findsOneWidget);
-    expect(find.text('first body'), findsOneWidget);
-    expect(find.text('second title'), findsOneWidget);
+      expect(find.text('Apple'), findsOneWidget);
+      expect(find.text('Family: Rosaceae'), findsOneWidget);
+      expect(find.text('Genus: Malus'), findsOneWidget);
+      expect(find.text('Calories: 52.0'), findsOneWidget);
+      expect(find.text('Protein: 0.3g'), findsOneWidget);
+      expect(find.text('Carbohydrates: 13.8g'), findsOneWidget);
+      expect(find.text('Fat: 0.2g'), findsOneWidget);
+    });
 
-    final listView = tester.widget<ListView>(find.byType(ListView));
-    expect(listView, isA<ListView>());
-    expect(find.byType(ListTile), findsNWidgets(2));
-  });
+    testWidgets('FruitHeader shows the welcome text and button', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        const MaterialApp(home: Scaffold(body: FruitHeader())),
+      );
 
-  testWidgets('shows an error with retry on failure', (tester) async {
-    await tester.pumpWidget(
-      MyApp(apiService: serviceReturning('bad', status: 500)),
-    );
-    await tester.pumpAndSettle();
+      expect(find.text('Welcome to Fruit Directory'), findsOneWidget);
+      expect(find.text('View Fruits'), findsOneWidget);
+    });
 
-    expect(find.textContaining('Failed to load posts'), findsOneWidget);
-    expect(find.text('Retry'), findsOneWidget);
-  });
+    testWidgets('ListView.builder renders one card per fruit', (
+      tester,
+    ) async {
+      final fruits = [
+        Fruit.fromJson(fruitJson('Apple')),
+        Fruit.fromJson(fruitJson('Banana', family: 'Musaceae')),
+      ];
 
-  testWidgets('retry re-issues the request and succeeds', (tester) async {
-    var calls = 0;
-    final service = ApiService(
-      client: MockClient((_) async {
-        calls++;
-        if (calls == 1) return http.Response('bad', 500);
-        return http.Response(twoPosts, 200);
-      }),
-    );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ListView(
+              children: [
+                const FruitHeader(),
+                ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: fruits.length,
+                  itemBuilder: (context, index) => FruitCard(
+                    fruit: fruits[index],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
 
-    await tester.pumpWidget(MyApp(apiService: service));
-    await tester.pumpAndSettle();
-    expect(find.text('Retry'), findsOneWidget);
+      expect(find.byType(FruitCard), findsNWidgets(2));
+      expect(find.text('Apple'), findsOneWidget);
+      expect(find.text('Banana'), findsOneWidget);
+    });
 
-    await tester.tap(find.text('Retry'));
-    await tester.pumpAndSettle();
+    testWidgets('MyApp renders the Fruit Directory home page', (
+      tester,
+    ) async {
+      await tester.pumpWidget(const MyApp());
+      await tester.pump();
 
-    expect(calls, 2);
-    expect(find.text('first title'), findsOneWidget);
-  });
-
-  testWidgets('shows the empty state for an empty list', (tester) async {
-    await tester.pumpWidget(MyApp(apiService: serviceReturning('[]')));
-    await tester.pumpAndSettle();
-
-    expect(find.text('No posts found.'), findsOneWidget);
+      expect(find.text('Fruit Directory'), findsOneWidget);
+      expect(find.byType(FutureBuilder<List<Fruit>>), findsOneWidget);
+    });
   });
 }
